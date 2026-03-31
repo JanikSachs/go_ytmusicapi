@@ -32,6 +32,39 @@ const (
 // SearchResult is a single item in a search response.
 type SearchResult = model.SearchResult
 
+// Artist is the full detail of a YouTube Music artist page.
+type Artist = model.Artist
+
+// ArtistSongsSection holds the top songs listed on an artist page.
+type ArtistSongsSection = model.ArtistSongsSection
+
+// ArtistSong is a single song entry on an artist page.
+type ArtistSong = model.ArtistSong
+
+// ArtistSection holds a section of an artist's releases (albums, singles, videos).
+type ArtistSection = model.ArtistSection
+
+// ArtistAlbum is a single album/single/video entry in an artist section.
+type ArtistAlbum = model.ArtistAlbum
+
+// RelatedArtist is a related artist entry on an artist page.
+type RelatedArtist = model.RelatedArtist
+
+// Album is the full detail of a YouTube Music album browse page.
+type Album = model.Album
+
+// AlbumTrack is a single track within an album.
+type AlbumTrack = model.AlbumTrack
+
+// Playlist is the full detail of a YouTube Music playlist browse page.
+type Playlist = model.Playlist
+
+// PlaylistTrack is a single track within a playlist.
+type PlaylistTrack = model.PlaylistTrack
+
+// Song represents basic metadata for a YouTube Music song/video.
+type Song = model.Song
+
 // SearchOptions configures a search request.
 type SearchOptions struct {
 	// Filter limits results to a specific type.
