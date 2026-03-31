@@ -164,8 +164,6 @@ func ParseSearchResult(data map[string]any, resultType string, category string) 
 			if len(itemCountParts) > 0 {
 				if n, err := strconv.Atoi(itemCountParts[0]); err == nil {
 					result.ItemCount = n
-				} else {
-					result.ItemCount = itemCountParts[0]
 				}
 			}
 			if hasAuthor {

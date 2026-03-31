@@ -65,8 +65,10 @@ type SearchResult struct {
 	Views          string           `json:"views,omitempty"`
 	IsExplicit     bool             `json:"isExplicit,omitempty"`
 	InLibrary      bool             `json:"inLibrary,omitempty"`
-	ItemCount      any              `json:"itemCount,omitempty"`
-	Author         any              `json:"author,omitempty"`
+	// ItemCount is the number of tracks in a playlist result (0 when unknown).
+	ItemCount int    `json:"itemCount,omitempty"`
+	// Author is the playlist owner or contributing artist name.
+	Author    string `json:"author,omitempty"`
 	Name           string           `json:"name,omitempty"`        // profile handle
 	Subscribers    string           `json:"subscribers,omitempty"` // artist subscriber count
 	Date           string           `json:"date,omitempty"`        // episode date
