@@ -74,11 +74,36 @@ client, err := ytmusic.NewClient(
 )
 ```
 
+### Authentication from cookie file
+
+```go
+client, err := ytmusic.NewClient(
+    ytmusic.WithBrowserAuthFile("/path/to/cookies.txt", "https://music.youtube.com"),
+)
+```
+
 ### OAuth authentication
 
 ```go
 client, err := ytmusic.NewClient(
     ytmusic.WithOAuthToken(bearerToken),
+)
+```
+
+### Custom timeout and headers
+
+```go
+client, err := ytmusic.NewClient(
+    ytmusic.WithTimeout(10 * time.Second),
+    ytmusic.WithHeaders(map[string]string{"X-Custom": "value"}),
+)
+```
+
+### Retry on transient errors
+
+```go
+client, err := ytmusic.NewClient(
+    ytmusic.WithRetry(3, 500*time.Millisecond),
 )
 ```
 
@@ -88,10 +113,15 @@ client, err := ytmusic.NewClient(
 
 **Browser authentication** requires extracting cookie headers from a logged-in
 YouTube Music browser session. The `__Secure-3PAPISID` cookie must be present.
+You can pass the cookie string directly (`WithBrowserAuth`) or load it from a
+file (`WithBrowserAuthFile`).
 
 **OAuth** requires a valid Bearer token obtained through the Google OAuth2 device
-code flow. See [docs/migration.md](docs/migration.md) for details on how
-the Python authentication types map to Go equivalents.
+code flow.
+
+See [docs/auth.md](docs/auth.md) for detailed authentication guidance and
+[docs/migration.md](docs/migration.md) for how the Python authentication
+types map to Go equivalents.
 
 ## Configuration Options
 
@@ -101,8 +131,12 @@ the Python authentication types map to Go equivalents.
 | `WithLocation(loc)` | Geographic location (ISO country code) | `""` |
 | `WithUserID(id)` | Brand account user ID | `""` |
 | `WithHTTPClient(h)` | Custom `*http.Client` | 30 s timeout |
+| `WithTimeout(d)` | Request timeout (overrides `WithHTTPClient` timeout) | `30s` |
+| `WithHeaders(h)` | Extra HTTP headers added to every request | — |
 | `WithBrowserAuth(cookie, origin)` | Browser cookie auth | — |
+| `WithBrowserAuthFile(path, origin)` | Browser cookie auth loaded from file | — |
 | `WithOAuthToken(token)` | OAuth Bearer token auth | — |
+| `WithRetry(maxAttempts, wait)` | Retry on transient errors (5xx / network) | disabled |
 
 ## Search Filters
 
