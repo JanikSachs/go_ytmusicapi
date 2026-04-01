@@ -291,3 +291,166 @@ func TestWithUserAgent(t *testing.T) {
 		t.Errorf("User-Agent = %q, want %q", gotUA, "custom-agent/1.0")
 	}
 }
+
+func TestGet_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("hello world"))
+	}))
+	defer srv.Close()
+
+	// Use WithHTTPClient to inject the test server's own client so we can hit srv.URL directly.
+	c := transport.NewClient(
+		map[string]string{},
+		transport.WithHTTPClient(srv.Client()),
+	)
+	data, err := c.Get(context.Background(), srv.URL+"/test", nil)
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if string(data) != "hello world" {
+		t.Errorf("Get() = %q, want %q", string(data), "hello world")
+	}
+}
+
+func TestGet_WithExtraHeaders(t *testing.T) {
+	var gotHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-Test-Header")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	c := transport.NewClient(
+		map[string]string{},
+		transport.WithHTTPClient(srv.Client()),
+	)
+	_, err := c.Get(context.Background(), srv.URL, map[string]string{"X-Test-Header": "my-value"})
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if gotHeader != "my-value" {
+		t.Errorf("X-Test-Header = %q, want %q", gotHeader, "my-value")
+	}
+}
+
+func TestGet_ContextCancelled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	c := transport.NewClient(
+		map[string]string{},
+		transport.WithHTTPClient(srv.Client()),
+	)
+	_, err := c.Get(ctx, srv.URL, nil)
+	if err == nil {
+		t.Fatal("Get() expected timeout error, got nil")
+	}
+}
+
+func TestWithHTTPClient(t *testing.T) {
+	var requestCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer srv.Close()
+
+	// Create an http.Client with the test server's own transport so it hits srv.
+	customHTTP := srv.Client()
+
+	c := transport.NewClient(
+		map[string]string{"Content-Type": "application/json"},
+		transport.WithHTTPClient(customHTTP),
+		// Override the URL via middleware to point at srv.
+		transport.WithMiddleware(func(next http.RoundTripper) http.RoundTripper {
+			return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				req2 := req.Clone(req.Context())
+				req2.URL.Scheme = "http"
+				req2.URL.Host = srv.Listener.Addr().String()
+				return http.DefaultTransport.RoundTrip(req2)
+			})
+		}),
+	)
+	_, err := c.Post(context.Background(), "search", "", map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("Post() unexpected error: %v", err)
+	}
+	if requestCount != 1 {
+		t.Errorf("expected 1 request, got %d", requestCount)
+	}
+}
+
+func TestWithExtraHeaders(t *testing.T) {
+	var gotHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-Extra")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{})
+	}))
+	defer srv.Close()
+
+	c := buildClient(srv, transport.WithExtraHeaders(map[string]string{"X-Extra": "extra-value"}))
+	_, err := c.Post(context.Background(), "search", "", map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("Post() unexpected error: %v", err)
+	}
+	if gotHeader != "extra-value" {
+		t.Errorf("X-Extra header = %q, want %q", gotHeader, "extra-value")
+	}
+}
+
+func TestServerError_Error(t *testing.T) {
+	err := &transport.ServerError{Message: "server failed", StatusCode: 503}
+	if err.Error() != "server failed" {
+		t.Errorf("Error() = %q, want %q", err.Error(), "server failed")
+	}
+	if err.StatusCode != 503 {
+		t.Errorf("StatusCode = %d, want 503", err.StatusCode)
+	}
+}
+
+func TestParseError_ErrorAndUnwrap(t *testing.T) {
+	cause := errors.New("the root cause")
+	err := &transport.ParseError{Message: "parse failed", Cause: cause}
+	want := "transport: parse failed"
+	if err.Error() != want {
+		t.Errorf("Error() = %q, want %q", err.Error(), want)
+	}
+	if err.Unwrap() != cause {
+		t.Errorf("Unwrap() = %v, want %v", err.Unwrap(), cause)
+	}
+}
+
+func TestPost_ServerError_WithMessage(t *testing.T) {
+	// Server returns 4xx with a JSON error message body.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "quota exceeded"},
+		})
+	}))
+	defer srv.Close()
+
+	c := buildClient(srv)
+	_, err := c.Post(context.Background(), "search", "", map[string]any{}, nil)
+	if err == nil {
+		t.Fatal("Post() expected error, got nil")
+	}
+	var serverErr *transport.ServerError
+	if !errors.As(err, &serverErr) {
+		t.Fatalf("expected *transport.ServerError, got %T: %v", err, err)
+	}
+	if serverErr.StatusCode != http.StatusForbidden {
+		t.Errorf("StatusCode = %d, want %d", serverErr.StatusCode, http.StatusForbidden)
+	}
+}
