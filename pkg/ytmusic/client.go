@@ -1,12 +1,8 @@
 package ytmusic
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 
 	"github.com/JanikSachs/go_ytmusicapi/internal/auth"
 	"github.com/JanikSachs/go_ytmusicapi/internal/endpoints"
@@ -17,9 +13,9 @@ import (
 
 // Client is the public YouTube Music API client.
 type Client struct {
-	cfg     *config
-	session *auth.Session
-	http    *http.Client
+	cfg       *config
+	session   *auth.Session
+	transport *transport.Client
 }
 
 // NewClient creates a new Client with the provided options.
@@ -32,6 +28,13 @@ func NewClient(opts ...Option) (*Client, error) {
 	var session *auth.Session
 	var err error
 	switch {
+	case cfg.session != nil:
+		session = cfg.session
+	case cfg.browserAuthFile != "":
+		session, err = auth.LoadBrowserAuthFromFile(cfg.browserAuthFile, cfg.authOrigin)
+		if err != nil {
+			return nil, fmt.Errorf("ytmusic: load browser auth from file: %w", err)
+		}
 	case cfg.authCookie != "":
 		session, err = auth.NewBrowserAuth(cfg.authCookie, cfg.authOrigin)
 		if err != nil {
@@ -43,7 +46,27 @@ func NewClient(opts ...Option) (*Client, error) {
 		session = auth.NewUnauthenticated()
 	}
 
-	return &Client{cfg: cfg, session: session, http: cfg.httpClient}, nil
+	baseHeaders := map[string]string{
+		"User-Agent":      transport.UserAgent,
+		"Accept":          "*/*",
+		"Accept-Encoding": "gzip, deflate",
+		"Content-Type":    "application/json",
+		"Origin":          transport.YTMDomain,
+	}
+
+	transportOpts := []transport.ClientOption{
+		transport.WithHTTPClient(cfg.httpClient),
+	}
+	if len(cfg.headers) > 0 {
+		transportOpts = append(transportOpts, transport.WithExtraHeaders(cfg.headers))
+	}
+	if cfg.retryPolicy.MaxAttempts > 1 {
+		transportOpts = append(transportOpts, transport.WithRetry(cfg.retryPolicy))
+	}
+
+	tc := transport.NewClient(baseHeaders, transportOpts...)
+
+	return &Client{cfg: cfg, session: session, transport: tc}, nil
 }
 
 // Search performs a YouTube Music search.
@@ -252,55 +275,7 @@ func (c *Client) GetSong(ctx context.Context, videoID string) (*model.Song, erro
 }
 
 func (c *Client) sendRequest(ctx context.Context, endpoint string, body map[string]any) (map[string]any, error) {
-	url := transport.YTMBaseAPI + endpoint + transport.YTMParams
-
-	b, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request body: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", transport.UserAgent)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Encoding", "gzip, deflate")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", transport.YTMDomain)
-
-	for k, v := range c.session.Headers() {
-		req.Header.Set(k, v)
-	}
-
-	req.AddCookie(&http.Cookie{Name: "SOCS", Value: "CAI"})
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("decode response JSON: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		msg := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, resp.Status)
-		if errObj, ok := result["error"].(map[string]any); ok {
-			if errMsg, ok := errObj["message"].(string); ok {
-				msg += ": " + errMsg
-			}
-		}
-		return nil, &ServerError{StatusCode: resp.StatusCode, Message: msg}
-	}
-
-	return result, nil
+	// URL query params beyond "?alt=json" are not needed for the current endpoints;
+	// all search/filter params are encoded inside the request body.
+	return c.transport.Post(ctx, endpoint, "", body, c.session.Headers())
 }
