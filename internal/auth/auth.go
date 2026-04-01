@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -90,4 +91,15 @@ func getAuthorization(auth string) string {
 	h := sha1.New()
 	h.Write([]byte(ts + " " + auth))
 	return fmt.Sprintf("SAPISIDHASH %s_%x", ts, h.Sum(nil))
+}
+
+// LoadBrowserAuthFromFile reads a raw cookie string from path and creates a Session.
+// The file should contain a single line with the raw Cookie header value.
+func LoadBrowserAuthFromFile(path, origin string) (*Session, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("auth: read cookie file: %w", err)
+	}
+	cookieStr := strings.TrimSpace(string(data))
+	return NewBrowserAuth(cookieStr, origin)
 }
