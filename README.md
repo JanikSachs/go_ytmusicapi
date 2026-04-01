@@ -12,10 +12,10 @@ rewritten from scratch in idiomatic Go 1.24+.
 | Browser cookie authentication | ✅ |
 | OAuth Bearer token authentication | ✅ |
 | Search (songs, videos, albums, artists, playlists, profiles, podcasts, episodes) | ✅ |
-| Artist lookup | 🚧 planned |
-| Album lookup | 🚧 planned |
-| Playlist lookup | 🚧 planned |
-| Song metadata | 🚧 planned |
+| Artist lookup | ✅ |
+| Album lookup | ✅ |
+| Playlist lookup | ✅ |
+| Song metadata | ✅ |
 
 ## Installation
 
@@ -64,6 +64,58 @@ results, err := client.Search(ctx, "Bohemian Rhapsody", ytmusic.SearchOptions{
     Filter: "songs",
     Limit:  10,
 })
+```
+
+### Get artist
+
+```go
+// browseId is the YouTube Music channel ID for the artist.
+artist, err := client.GetArtist(ctx, "UCpjSLrUBYkHe9KQSFMxb3Hg")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(artist.Name, "-", artist.Subscribers, "subscribers")
+for _, song := range artist.Songs.Results {
+    fmt.Printf("  %s (%s)\n", song.Title, song.VideoID)
+}
+```
+
+### Get album
+
+```go
+// browseId must start with "MPRE".
+album, err := client.GetAlbum(ctx, "MPREb_QtqXtd2xZMR")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("%s (%s) — %d tracks\n", album.Title, album.Year, album.TrackCount)
+for i, track := range album.Tracks {
+    fmt.Printf("  %d. %s (%s)\n", track.TrackNumber, track.Title, track.Duration)
+}
+```
+
+### Get playlist
+
+```go
+playlist, err := client.GetPlaylist(ctx, "PLQwVIlKxHM6qv-o99iX9R85og7IzF9YS_")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("%s by %s — %d tracks\n", playlist.Title, playlist.Author.Name, playlist.TrackCount)
+for _, track := range playlist.Tracks {
+    fmt.Printf("  %s by %s\n", track.Title, track.Artists[0].Name)
+}
+```
+
+### Get song metadata
+
+```go
+// Returns basic metadata from the player endpoint; streaming URLs are not included.
+song, err := client.GetSong(ctx, "dQw4w9WgXcQ")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("%s — %s views\n", song.Title, song.Views)
 ```
 
 ### Authenticated search (browser cookies)

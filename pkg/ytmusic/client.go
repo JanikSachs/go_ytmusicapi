@@ -156,6 +156,101 @@ func getLocalizedResultTypes() []string {
 	}
 }
 
+// GetArtist returns the detail page for the artist identified by browseId.
+// browseId is the channelId for the artist (e.g. "UCxxxxxxxx").
+func (c *Client) GetArtist(ctx context.Context, browseID string) (*model.Artist, error) {
+	if browseID == "" {
+		return nil, &UserError{Message: "browseId must not be empty"}
+	}
+	// Strip "MPLA" prefix if present (matches Python behaviour)
+	if len(browseID) > 4 && browseID[:4] == "MPLA" {
+		browseID = browseID[4:]
+	}
+
+	body := endpoints.BrowseBody(browseID)
+	ctx_ := endpoints.Context(c.cfg.language, c.cfg.location, c.cfg.userID)
+	endpoints.MergeBody(body, ctx_)
+
+	response, err := c.sendRequest(ctx, "browse", body)
+	if err != nil {
+		return nil, fmt.Errorf("ytmusic: get artist request: %w", err)
+	}
+	return parser.ParseArtist(response), nil
+}
+
+// GetAlbum returns the detail page for the album identified by browseId.
+// browseId must start with "MPRE".
+func (c *Client) GetAlbum(ctx context.Context, browseID string) (*model.Album, error) {
+	if browseID == "" {
+		return nil, &UserError{Message: "browseId must not be empty"}
+	}
+	if len(browseID) < 4 || browseID[:4] != "MPRE" {
+		return nil, &UserError{Message: "invalid album browseId: must start with MPRE"}
+	}
+
+	body := endpoints.BrowseBody(browseID)
+	ctx_ := endpoints.Context(c.cfg.language, c.cfg.location, c.cfg.userID)
+	endpoints.MergeBody(body, ctx_)
+
+	response, err := c.sendRequest(ctx, "browse", body)
+	if err != nil {
+		return nil, fmt.Errorf("ytmusic: get album request: %w", err)
+	}
+	return parser.ParseAlbum(response), nil
+}
+
+// GetPlaylist returns the detail page for the playlist identified by playlistId.
+// playlistId should be the bare playlist ID (without a "VL" prefix).
+func (c *Client) GetPlaylist(ctx context.Context, playlistID string) (*model.Playlist, error) {
+	if playlistID == "" {
+		return nil, &UserError{Message: "playlistId must not be empty"}
+	}
+
+	browseID := playlistID
+	if len(browseID) < 2 || browseID[:2] != "VL" {
+		browseID = "VL" + playlistID
+	}
+
+	body := endpoints.BrowseBody(browseID)
+	ctx_ := endpoints.Context(c.cfg.language, c.cfg.location, c.cfg.userID)
+	endpoints.MergeBody(body, ctx_)
+
+	response, err := c.sendRequest(ctx, "browse", body)
+	if err != nil {
+		return nil, fmt.Errorf("ytmusic: get playlist request: %w", err)
+	}
+	return parser.ParsePlaylist(playlistID, response), nil
+}
+
+// GetSong returns basic metadata for the song/video identified by videoId.
+// Note: streaming URLs require additional authenticated context and are not included.
+// TODO: streaming URL resolution via the player endpoint with a valid signatureTimestamp.
+func (c *Client) GetSong(ctx context.Context, videoID string) (*model.Song, error) {
+	if videoID == "" {
+		return nil, &UserError{Message: "videoId must not be empty"}
+	}
+
+	body := endpoints.PlayerBody(videoID)
+	ctx_ := endpoints.Context(c.cfg.language, c.cfg.location, c.cfg.userID)
+	endpoints.MergeBody(body, ctx_)
+
+	response, err := c.sendRequest(ctx, "player", body)
+	if err != nil {
+		return nil, fmt.Errorf("ytmusic: get song request: %w", err)
+	}
+
+	song := &model.Song{VideoID: videoID}
+	// Basic metadata from videoDetails
+	vd := parser.NavMap(response, []any{"videoDetails"})
+	if vd != nil {
+		song.Title, _ = vd["title"].(string)
+		song.Views, _ = vd["viewCount"].(string)
+		// thumbnails
+		song.Thumbnails = parser.ParseThumbnails(vd)
+	}
+	return song, nil
+}
+
 func (c *Client) sendRequest(ctx context.Context, endpoint string, body map[string]any) (map[string]any, error) {
 	url := transport.YTMBaseAPI + endpoint + transport.YTMParams
 
