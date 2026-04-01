@@ -69,9 +69,20 @@ func NewClient(opts ...Option) (*Client, error) {
 	return &Client{cfg: cfg, session: session, transport: tc}, nil
 }
 
-// Search performs a YouTube Music search.
+// Search performs a YouTube Music search and returns all results on the first page.
 // opts is optional; only the first SearchOptions element is used.
 func (c *Client) Search(ctx context.Context, query string, opts ...SearchOptions) ([]*model.SearchResult, error) {
+	page, err := c.SearchPage(ctx, query, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return page.Results, nil
+}
+
+// SearchPage performs a YouTube Music search and returns the first page of
+// results together with a continuation token for retrieving further pages.
+// opts is optional; only the first SearchOptions element is used.
+func (c *Client) SearchPage(ctx context.Context, query string, opts ...SearchOptions) (*SearchPage, error) {
 	var o SearchOptions
 	if len(opts) > 0 {
 		o = opts[0]
@@ -86,23 +97,58 @@ func (c *Client) Search(ctx context.Context, query string, opts ...SearchOptions
 	}
 
 	body := endpoints.SearchBody(query, params)
-	ctx_ := endpoints.Context(c.cfg.language, c.cfg.location, c.cfg.userID)
-	endpoints.MergeBody(body, ctx_)
+	apiContext := endpoints.Context(c.cfg.language, c.cfg.location, c.cfg.userID)
+	endpoints.MergeBody(body, apiContext)
 
 	response, err := c.sendRequest(ctx, "search", body)
 	if err != nil {
 		return nil, fmt.Errorf("ytmusic: search request: %w", err)
 	}
 
-	return parseSearchResponse(response, o.Filter, o.Scope), nil
+	results, continuation := parseSearchResponse(response, o.Filter, o.Scope)
+	return &SearchPage{
+		Results:      results,
+		Continuation: continuation,
+		HasMore:      continuation != "",
+	}, nil
 }
 
-func parseSearchResponse(response map[string]any, filter, scope string) []*model.SearchResult {
+// SearchNext fetches the next page of search results using a continuation token
+// returned by a previous SearchPage or SearchNext call.
+// Returns an empty page when continuation is empty.
+func (c *Client) SearchNext(ctx context.Context, continuation string) (*SearchPage, error) {
+	if continuation == "" {
+		return &SearchPage{}, nil
+	}
+
+	urlSuffix := endpoints.ContinuationURLParams(continuation)
+	body := endpoints.ContinuationBody(continuation)
+	apiContext := endpoints.Context(c.cfg.language, c.cfg.location, c.cfg.userID)
+	endpoints.MergeBody(body, apiContext)
+
+	response, err := c.sendRequest(ctx, "search", body, urlSuffix)
+	if err != nil {
+		return nil, fmt.Errorf("ytmusic: search continuation request: %w", err)
+	}
+
+	results, nextContinuation := parseContinuationResponse(response)
+	return &SearchPage{
+		Results:      results,
+		Continuation: nextContinuation,
+		HasMore:      nextContinuation != "",
+	}, nil
+}
+
+// parseSearchResponse extracts search results and an optional continuation token
+// from a raw search API response. The continuation token is taken from the last
+// musicShelfRenderer that carries one.
+func parseSearchResponse(response map[string]any, filter, scope string) ([]*model.SearchResult, string) {
 	var results []*model.SearchResult
+	var continuation string
 
 	contents, ok := response["contents"]
 	if !ok {
-		return results
+		return results, continuation
 	}
 
 	var searchContents map[string]any
@@ -125,12 +171,12 @@ func parseSearchResponse(response map[string]any, filter, scope string) []*model
 	}
 
 	if searchContents == nil {
-		return results
+		return results, continuation
 	}
 
 	sectionList := parser.NavMap(searchContents, []any{"sectionListRenderer"})
 	if sectionList == nil {
-		return results
+		return results, continuation
 	}
 	sections, _ := sectionList["contents"].([]any)
 
@@ -167,9 +213,31 @@ func parseSearchResponse(response map[string]any, filter, scope string) []*model
 		items, _ := shelf["contents"].([]any)
 		shelfResults := parser.ParseSearchResults(items, resultType, category)
 		results = append(results, shelfResults...)
+
+		if tok := parser.ExtractShelfContinuation(shelf); tok != "" {
+			continuation = tok
+		}
 	}
 
-	return results
+	return results, continuation
+}
+
+// parseContinuationResponse extracts search results and an optional next
+// continuation token from a pagination follow-up response. The response uses a
+// different top-level key (continuationContents) compared to the initial search.
+func parseContinuationResponse(response map[string]any) ([]*model.SearchResult, string) {
+	cc, _ := response["continuationContents"].(map[string]any)
+	if cc == nil {
+		return nil, ""
+	}
+	shelf, _ := cc["musicShelfContinuation"].(map[string]any)
+	if shelf == nil {
+		return nil, ""
+	}
+	items, _ := shelf["contents"].([]any)
+	results := parser.ParseSearchResults(items, "", "")
+	continuation := parser.ExtractShelfContinuation(shelf)
+	return results, continuation
 }
 
 func getLocalizedResultTypes() []string {
@@ -179,6 +247,22 @@ func getLocalizedResultTypes() []string {
 	}
 }
 
+func (c *Client) sendRequest(ctx context.Context, endpoint string, body map[string]any, urlSuffix ...string) (map[string]any, error) {
+	suffix := ""
+	if len(urlSuffix) > 0 {
+		suffix = urlSuffix[0]
+	}
+	url := transport.YTMBaseAPI + endpoint + transport.YTMParams + suffix
+  body := endpoints.BrowseBody(browseID)
+	ctx_ := endpoints.Context(c.cfg.language, c.cfg.location, c.cfg.userID)
+	endpoints.MergeBody(body, ctx_)
+
+	response, err := c.sendRequest(ctx, "browse", body)
+	if err != nil {
+		return nil, fmt.Errorf("ytmusic: get artist request: %w", err)
+	}
+	return parser.ParseArtist(response), nil
+}
 // GetArtist returns the detail page for the artist identified by browseId.
 // browseId is the channelId for the artist (e.g. "UCxxxxxxxx").
 func (c *Client) GetArtist(ctx context.Context, browseID string) (*model.Artist, error) {

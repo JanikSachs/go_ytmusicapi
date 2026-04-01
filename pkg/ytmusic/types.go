@@ -32,6 +32,20 @@ const (
 // SearchResult is a single item in a search response.
 type SearchResult = model.SearchResult
 
+// SearchPage holds one page of search results together with an optional
+// continuation token that can be passed to Client.SearchNext to retrieve
+// the following page.
+type SearchPage struct {
+	// Results contains the search results for this page.
+	Results []*model.SearchResult
+
+	// Continuation is the opaque token needed to fetch the next page.
+	// It is empty when there are no further pages.
+	Continuation string
+
+	// HasMore reports whether a following page is available.
+	HasMore bool
+}
 // Artist is the full detail of a YouTube Music artist page.
 type Artist = model.Artist
 
