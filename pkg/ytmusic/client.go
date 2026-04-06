@@ -47,11 +47,10 @@ func NewClient(opts ...Option) (*Client, error) {
 	}
 
 	baseHeaders := map[string]string{
-		"User-Agent":      transport.UserAgent,
-		"Accept":          "*/*",
-		"Accept-Encoding": "gzip, deflate",
-		"Content-Type":    "application/json",
-		"Origin":          transport.YTMDomain,
+		"User-Agent":   transport.UserAgent,
+		"Accept":       "*/*",
+		"Content-Type": "application/json",
+		"Origin":       transport.YTMDomain,
 	}
 
 	transportOpts := []transport.ClientOption{
