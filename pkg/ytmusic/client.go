@@ -252,17 +252,16 @@ func (c *Client) sendRequest(ctx context.Context, endpoint string, body map[stri
 	if len(urlSuffix) > 0 {
 		suffix = urlSuffix[0]
 	}
-	url := transport.YTMBaseAPI + endpoint + transport.YTMParams + suffix
-  body := endpoints.BrowseBody(browseID)
 	ctx_ := endpoints.Context(c.cfg.language, c.cfg.location, c.cfg.userID)
 	endpoints.MergeBody(body, ctx_)
 
-	response, err := c.sendRequest(ctx, "browse", body)
+	response, err := c.transport.Post(ctx, endpoint, suffix, body, c.session.Headers())
 	if err != nil {
-		return nil, fmt.Errorf("ytmusic: get artist request: %w", err)
+		return nil, fmt.Errorf("ytmusic: send request: %w", err)
 	}
-	return parser.ParseArtist(response), nil
+	return response, nil
 }
+
 // GetArtist returns the detail page for the artist identified by browseId.
 // browseId is the channelId for the artist (e.g. "UCxxxxxxxx").
 func (c *Client) GetArtist(ctx context.Context, browseID string) (*model.Artist, error) {
@@ -356,10 +355,4 @@ func (c *Client) GetSong(ctx context.Context, videoID string) (*model.Song, erro
 		song.Thumbnails = parser.ParseThumbnails(vd)
 	}
 	return song, nil
-}
-
-func (c *Client) sendRequest(ctx context.Context, endpoint string, body map[string]any) (map[string]any, error) {
-	// URL query params beyond "?alt=json" are not needed for the current endpoints;
-	// all search/filter params are encoded inside the request body.
-	return c.transport.Post(ctx, endpoint, "", body, c.session.Headers())
 }
